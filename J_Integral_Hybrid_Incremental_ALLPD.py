@@ -92,11 +92,12 @@ def filter_signal(data_series, dt, cutoff=50):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('exp_id', nargs='?', default='Unknown')
+    parser.add_argument('exp_id')
     args = parser.parse_args()
     exp_id = args.exp_id
+    specimen_type = cfg.infer_specimen_type(exp_id)
 
-    print(f"--- J-Integral Calc ({cfg.SPECIMEN_TYPE}) : {exp_id} ---")
+    print(f"--- J-Integral Calc ({specimen_type}) : {exp_id} ---")
 
     # 1. 路径准备
     root = cfg.ROOT_DIR
@@ -105,22 +106,21 @@ def main():
     if not os.path.exists(res_dir): os.makedirs(res_dir)
 
     # 2. 读取数据
-    try:
-        df_fd = pd.read_csv(os.path.join(data_dir, f'{exp_id}_force_displacement_from_FIELD.csv'))
-        df_cl = pd.read_csv(os.path.join(data_dir, f'{exp_id}_crack_length_UserTip_vs_time.csv'))
-        # 假设 ALLPD_vs_time.csv 中的 ALLPD 列现在代表累计的塑性功 U_p^i
-        df_pd = pd.read_csv(os.path.join(data_dir, f'{exp_id}_ALLPD_vs_time.csv'))
+    df_fd = pd.read_csv(os.path.join(data_dir, f'{exp_id}_force_displacement_from_FIELD.csv'))
+    df_cl = pd.read_csv(os.path.join(data_dir, f'{exp_id}_crack_length_UserTip_vs_time.csv'))
+    # 假设 ALLPD_vs_time.csv 中的 ALLPD 列现在代表累计的塑性功 U_p^i
+    df_pd = pd.read_csv(os.path.join(data_dir, f'{exp_id}_ALLPD_vs_time.csv'))
 
-        # 模量读取
-        mod_file = os.path.join(res_dir, f'{exp_id}_Modulus_EnergyCriteria.txt')
-        with open(mod_file, 'r') as f:
-            c = f.read()
-            import re
-            # E_val 对应公式中的 E_bar (有效杨氏模量)
-            E_bar = float(re.search(r"Method B \(Energy\):\s*([0-9\.]+)", c).group(1))
-    except Exception as e:
-        print(f"!! Error loading data: {e}")
-        return
+    # 模量读取（必须来自上一步模量脚本输出）
+    mod_file = os.path.join(res_dir, f'{exp_id}_Modulus_EnergyCriteria.txt')
+    with open(mod_file, 'r', encoding='utf-8') as f:
+        c = f.read()
+        import re
+        match = re.search(r"Method B \(Energy\):\s*([0-9\.]+)", c)
+        if not match:
+            raise ValueError(f"模量文件缺少 Method B (Energy) 行: {mod_file}")
+        # E_val 对应公式中的 E_bar (有效杨氏模量)
+        E_bar = float(match.group(1))
 
     # 3. 数据预处理
     # 3.1 Force 滤波
@@ -158,7 +158,7 @@ def main():
     tip_0 = df_cl['Tip_X'].iloc[0]
 
     # 计算当前物理裂纹长度 a
-    if cfg.SPECIMEN_TYPE == 'SENT':
+    if specimen_type == 'SENT':
         # SENT: 假设 a = Tip_X
         df_calc['a'] = df_calc['Tip_X']
     else:
@@ -170,7 +170,7 @@ def main():
     # ----------------------------------------------------
     J_tot = []
 
-    if cfg.SPECIMEN_TYPE == 'SENT':
+    if specimen_type == 'SENT':
         print("   -> Using NEW Total Work Method (Formulas 4 & 7) for SENT.")
         # Total Work Method (公式 4 & 7)
         func_K = calc_K_SENT
@@ -240,7 +240,7 @@ def main():
     df_calc['K_eq'] = np.sqrt(np.array(J_tot) * E_bar)
 
     # 保存结果
-    out_file = os.path.join(res_dir, f'{exp_id}_J_Hybrid_{cfg.SPECIMEN_TYPE}.xlsx')
+    out_file = os.path.join(res_dir, f'{exp_id}_J_Hybrid_{specimen_type}.xlsx')
     df_calc.to_excel(out_file, index=False)
     print(f"   -> Result Saved: {out_file}")
 

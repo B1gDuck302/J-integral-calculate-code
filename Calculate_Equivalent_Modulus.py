@@ -43,6 +43,14 @@ def calculate_lattice_properties(lattice_type, t1, t2, L_rod, E_s):
         formula = "Hex: E_method = (Ex+Ey)/2, Ex/Ey from provided closed-form expressions"
 
     elif lattice_type == 'Homo':
+        # 用户要求: Homo 取 t1=t2=t，并使用任一已有公式。
+        t = t1
+        # 这里选用 Kagome 形式作为 Homo 的临时统一表达。
+        rho_rel = sqrt3 * (t + t) / L_rod
+        E_x = E_y = ((t + t) / (sqrt3 * L_rod)) * E_s
+        nu_xy = nu_yx = 1.0 / 3.0
+        E_method = E_x
+        formula = "Homo(t1=t2=t): use Kagome-form Eeff = (2t)/(sqrt(3)L) * Es"
         raise NotImplementedError("Homo 的相对密度/模量公式尚未提供，请补充后接入。")
 
     else:
