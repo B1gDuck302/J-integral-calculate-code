@@ -51,6 +51,7 @@ def calculate_lattice_properties(lattice_type, t1, t2, L_rod, E_s):
         nu_xy = nu_yx = 1.0 / 3.0
         E_method = E_x
         formula = "Homo(t1=t2=t): use Kagome-form Eeff = (2t)/(sqrt(3)L) * Es"
+        raise NotImplementedError("Homo 的相对密度/模量公式尚未提供，请补充后接入。")
 
     else:
         raise ValueError("不支持的晶格类型: {0}".format(lattice_type))
