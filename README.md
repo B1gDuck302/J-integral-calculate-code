@@ -1,11 +1,5 @@
 # J-integral-calculate-code
 
-已按需求删除模型生成相关文件：
-
-- `Model.py`
-- `Model2.py`
-- `SENT.py`
-- `SENT_Composite_Strict.inp`
 
 已按需求删除流程精简相关文件：
 
