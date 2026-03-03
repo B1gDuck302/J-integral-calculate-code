@@ -51,6 +51,11 @@ def infer_lattice_type(exp_id):
 
 
 def infer_thin_rod_width(exp_id):
+    """根据模型名第三段三位数识别细杆宽度(mm)。
+
+    规则: 0** 表示 0.** mm，例如:
+      060 -> 0.6, 020 -> 0.2, 010 -> 0.1, 055 -> 0.55
+    """
     """根据模型名第三段三位数识别细杆宽度(mm): 050->0.5, 040->0.4。"""
     if not exp_id:
         raise ValueError("exp_id 不能为空，无法识别细杆宽度。")
@@ -58,6 +63,7 @@ def infer_thin_rod_width(exp_id):
     token = _split_model_name(exp_id)[2]
     if not (len(token) == 3 and token.isdigit()):
         raise ValueError(
+            "细杆宽度编码格式错误: '{0}'。期望三位数字(如 060/020/010/055)，并按 0** -> 0.** mm 解析。".format(token)
             "细杆宽度编码格式错误: '{0}'。期望三位数字(如 050/040)。".format(token)
         )
 
