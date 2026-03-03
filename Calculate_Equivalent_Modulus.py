@@ -1,126 +1,120 @@
 # -*- coding: utf-8 -*-
-# SCRIPT: Calculate_Equivalent_Modulus.py (Final Complete Version - FIXED OUTPUT)
-# 专注于使用无量纲柔度因子 V' 进行纯模量 E 的计算。
+# SCRIPT: Calculate_Equivalent_Modulus.py
+# 功能: 按模型名识别晶格类型/杆宽，并使用对应公式计算等效模量。
 
-import pandas as pd
-import numpy as np
+import math
 import os
 import sys
-from scipy.stats import linregress
-# 移除 matplotlib
 import project_config as cfg
 
-# ====================================================
-#    配置参数 (简化)
-# ====================================================
-LINEAR_START_RATIO = 1e-6
-LINEAR_END_RATIO = 0.3
-ELASTIC_RATIO_EPSILON = 0.01
 
-# ====================================================
-#    核心算法: 无量纲柔度因子 V'
-# ====================================================
-def calculate_compliance_coefficient(a, W, sp_type):
-    """
-    计算无量纲柔度 V' (Dimensionless Compliance)
-    定义: E = (Slope * V') / B
-    """
-    u = a / W
-    if u > 0.99: u = 0.99
+def calculate_lattice_properties(lattice_type, t1, t2, L_rod, E_s):
+    """根据晶格类型计算相对密度与等效模量。t1=细杆, t2=粗杆。"""
+    sqrt3 = math.sqrt(3.0)
 
-    if sp_type == 'SENT':
-        # SENT (CMOD) 公式 - 来源于用户提供的多项式
-        term_base = u / ((1 - u) ** 2)
-        term_poly = 1.197 - 1.933 * u + 5.398 * (u ** 2) - 2.176 * (u ** 3) + 2.072 * (u ** 4)
-        v_prime = term_base * term_poly * 2.0
-    elif sp_type == 'CT':
-        # CT (LLD) 公式 - 来源于 ASTM E1820
-        part1 = ((1 + u) / (1 - u)) ** 2
-        part2 = 2.1630 + 12.219 * u - 20.065 * u ** 2 - 0.9925 * u ** 3 + 20.609 * u ** 4 - 9.9314 * u ** 5
-        v_prime = part1 * part2
+    if lattice_type == 'Honey':
+        # ρ*/ρs = 2(t1+2t2)/(√3 L)
+        rho_rel = 2.0 * (t1 + 2.0 * t2) / (sqrt3 * L_rod)
+        # Ex = Ey = 2(t1+2t2)/(3√3 L) E
+        E_x = E_y = 2.0 * (t1 + 2.0 * t2) * E_s / (3.0 * sqrt3 * L_rod)
+        nu_xy = nu_yx = 1.0 / 3.0
+        E_method = E_x
+        formula = "Honey: Eeff = 2(t1+2t2)/(3sqrt(3)L) * Es"
 
-    return v_prime
+    elif lattice_type == 'Kagome':
+        # ρ*/ρs = √3(t1+t2)/L
+        rho_rel = sqrt3 * (t1 + t2) / L_rod
+        # Ex = Ey = (t1+t2)/(√3 L) E
+        E_x = E_y = (t1 + t2) * E_s / (sqrt3 * L_rod)
+        nu_xy = nu_yx = 1.0 / 3.0
+        E_method = E_x
+        formula = "Kagome: Eeff = (t1+t2)/(sqrt(3)L) * Es"
 
+    elif lattice_type == 'Hex':
+        # ρ*/ρs = (8t1+10t2)/(3√3L)
+        rho_rel = (8.0 * t1 + 10.0 * t2) / (3.0 * sqrt3 * L_rod)
+        # Ex, Ey from provided formulas
+        E_x = (2.0 * sqrt3 / 9.0) * ((2.0 * t1 + t2) / L_rod) * E_s
+        E_y = 2.0 * sqrt3 * ((t1 + 2.0 * t2) * (2.0 * t1 + t2)) * E_s / (L_rod * (17.0 * t1 + 10.0 * t2))
+        nu_xy = (3.0 * t1 + 6.0 * t2) / (17.0 * t1 + 10.0 * t2)
+        nu_yx = 1.0 / 3.0
+        # 下游流程需要单一E，Hex为各向异性，这里采用 Ex/Ey 平均值作为接口值
+        E_method = 0.5 * (E_x + E_y)
+        formula = "Hex: E_method = (Ex+Ey)/2, Ex/Ey from provided closed-form expressions"
 
-def load_simulation_data(data_dir, exp_id, file_suffix, col_name):
-    """通用数据加载函数：加载 P-V, ALLWK, ALLSE 等"""
-    f_path = os.path.join(data_dir, f'{exp_id}_{file_suffix}.csv')
-    if not os.path.exists(f_path):
-        if col_name != 'P' and col_name != 'V':  # P-V 缺失是致命错误，其他警告
-            print(f"Warning: File for {col_name} not found at {f_path}")
-        return None
-    try:
-        df = pd.read_csv(f_path)
+    elif lattice_type == 'Homo':
+        # 用户要求: Homo 取 t1=t2=t，并使用任一已有公式。
+        t = t1
+        # 这里选用 Kagome 形式作为 Homo 的临时统一表达。
+        rho_rel = sqrt3 * (t + t) / L_rod
+        E_x = E_y = ((t + t) / (sqrt3 * L_rod)) * E_s
+        nu_xy = nu_yx = 1.0 / 3.0
+        E_method = E_x
+        formula = "Homo(t1=t2=t): use Kagome-form Eeff = (2t)/(sqrt(3)L) * Es"
 
-        if col_name in ['P', 'V']:
-            # P-V 数据的特殊处理：归零和重命名
-            df = df.rename(columns=lambda x: 'P' if 'Force' in x else ('V' if 'Displacement' in x else x))
-            df['V'] = df['V'] - df['V'].iloc[0]
-            df['P'] = df['P'] - df['P'].iloc[0]
-            return df
-        else:
-            # ALLWK, ALLSE 数据的处理：归零和重命名
-            df = df.rename(columns={'Time': 'Time', col_name: col_name})
-            df[col_name] = df[col_name] - df[col_name].iloc[0]
-            return df[['Time', col_name]]
+    else:
+        raise ValueError("不支持的晶格类型: {0}".format(lattice_type))
 
-    except Exception as e:
-        print(f"Error loading {col_name} data: {e}")
-        return None
+    return {
+        'rho_rel': rho_rel,
+        'E_x': E_x,
+        'E_y': E_y,
+        'nu_xy': nu_xy,
+        'nu_yx': nu_yx,
+        'E_method': E_method,
+        'formula': formula,
+    }
 
 
 def main():
-    # 获取实验 ID
-    exp_id = sys.argv[1] if len(sys.argv) > 1 else 'Unknown'
+    if len(sys.argv) < 2:
+        raise ValueError('缺少模型ID参数。用法: python Calculate_Equivalent_Modulus.py <ModelID>')
+    exp_id = sys.argv[1]
 
-    # 路径设置
+    specimen_type = cfg.infer_specimen_type(exp_id)
+    lattice_type = cfg.infer_lattice_type(exp_id)
+    t1, t2 = cfg.get_rod_widths(exp_id)
+
     res_dir = os.path.join(cfg.ROOT_DIR, 'results', exp_id)
     if not os.path.exists(res_dir):
         os.makedirs(res_dir)
 
-    # ==========================================
-    #   1. 读取几何与材料参数 (来自 project_config)
-    # ==========================================
-    try:
-        d_rod = cfg.t  # 杆径 (对应配置里的 t)
-        L_rod = cfg.L_CHAR  # 杆长 (对应配置里的 L_CHAR)
-        E_s = cfg.E_MAT  # 基体材料模量 (对应配置里的 E_MAT)
-    except AttributeError as e:
-        print(f"!! [错误] project_config.py 缺少必要变量: {e}")
-        return
+    L_rod = cfg.L_CHAR
+    E_s = cfg.E_MAT
 
-    # ==========================================
-    #   2. 使用圆截面杆三角形网格公式计算
-    # ==========================================
-    # 公式: E* = (sqrt(3)*pi / 6) * (d/L) * E_s
-    geometric_factor = (np.sqrt(3.0) * np.pi) / 6.0  # 约等于 0.9069
-    E_exact = geometric_factor * (d_rod / L_rod) * E_s
+    props = calculate_lattice_properties(lattice_type, t1, t2, L_rod, E_s)
 
-    # ==========================================
-    #   3. 保存结果 (关键：匹配下游脚本读取格式)
-    # ==========================================
-    # 下游脚本 J_Integral...py 和 KR_Fit.py 会查找带有 "Method B (Energy):" 标签的行
     out_file = os.path.join(res_dir, f'{exp_id}_Modulus_EnergyCriteria.txt')
 
     with open(out_file, 'w', encoding='utf-8') as f:
         f.write(f"Experiment ID: {exp_id}\n")
-        f.write(f"Specimen Type: {cfg.SPECIMEN_TYPE}\n")
-        f.write(f"Calculation Method: Circular Rod Analytical (Triangular Lattice)\n")
-        f.write(f"Formula: E = (sqrt(3)*pi/6) * (d/L) * E_s\n")
-        f.write(f"------------------------------------------------\n")
-        f.write(f"Rod Diameter (d): {d_rod} mm\n")
-        f.write(f"Rod Length (L):   {L_rod} mm\n")
-        f.write(f"Base Modulus (Es): {E_s} MPa\n")
-        f.write(f"Geometric Factor: {geometric_factor:.4f}\n")
-        f.write(f"------------------------------------------------\n")
-        # 下面这一行是整合的关键，严禁修改格式，否则后续脚本会报错
-        f.write(f"Method B (Energy): {E_exact:.4f}\n")
+        f.write(f"Specimen Type: {specimen_type}\n")
+        f.write(f"Lattice Type: {lattice_type}\n")
+        f.write("Calculation Method: Lattice-Specific Analytical Model\n")
+        f.write(f"Formula: {props['formula']}\n")
+        f.write("------------------------------------------------\n")
+        f.write(f"Thin Rod Width t1:  {t1:.3f} mm\n")
+        f.write(f"Thick Rod Width t2: {t2:.3f} mm\n")
+        f.write(f"Rod Length (L):     {L_rod} mm\n")
+        f.write(f"Base Modulus (Es):  {E_s} MPa\n")
+        f.write("------------------------------------------------\n")
+        f.write(f"Relative Density (rho*/rho_s): {props['rho_rel']:.6f}\n")
+        f.write(f"E_x: {props['E_x']:.4f} MPa\n")
+        f.write(f"E_y: {props['E_y']:.4f} MPa\n")
+        f.write(f"nu_xy: {props['nu_xy']:.6f}\n")
+        f.write(f"nu_yx: {props['nu_yx']:.6f}\n")
+        f.write("------------------------------------------------\n")
+        # 下游脚本依赖该关键行
+        f.write(f"Method B (Energy): {props['E_method']:.4f}\n")
 
     print(f"[*] {exp_id} 模量计算成功！")
-    print(f"[*] 精确等效模量 E = {E_exact:.2f} MPa (已采用圆截面修正公式)")
-    print(f"[*] 结果已存入后续脚本的指定接口文件: {out_file}")
+    print(f"[*] 晶格类型: {lattice_type}")
+    print(f"[*] 细杆宽度: {t1:.3f} mm, 粗杆宽度: {t2:.3f} mm")
+    print(f"[*] 相对密度 rho*/rho_s = {props['rho_rel']:.6f}")
+    print(f"[*] E_x={props['E_x']:.2f} MPa, E_y={props['E_y']:.2f} MPa")
+    print(f"[*] Method B (Energy) 接口值 = {props['E_method']:.2f} MPa")
+    print(f"[*] 结果已存入: {out_file}")
+
 
 if __name__ == "__main__":
     main()
-
-
